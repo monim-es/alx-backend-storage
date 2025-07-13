@@ -1,42 +1,43 @@
 #!/usr/bin/env python3
 """
-Web caching and tracker using Redis
+Caching request module
 """
-import redis
-import requests
-from typing import Callable
 from functools import wraps
+from typing import Callable
+import requests
+import redis
 
 
-# Connect to Redis
-r = redis.Redis()
+def track_get_page(fn: Callable) -> Callable:
+    """Decorator for get_page"""
 
-
-def count_url_access(method: Callable) -> Callable:
-    """Decorator to count URL accesses."""
-    @wraps(method)
+    @wraps(fn)
     def wrapper(url: str) -> str:
-        r.incr(f"count:{url}")
-        return method(url)
+        """Wrapper that:
+        - check whether a url's data is cached
+        - tracks how many times get_page is called
+        """
+        client = redis.Redis()
+        client.incr(f"count:{url}")
+        cached_page = client.get(f"{url}")
+        if cached_page:
+            return cached_page.decode("utf-8")
+        response = fn(url)
+        client.set(f"{url}", response, 10)
+        return response
+
     return wrapper
 
 
-def cache_result(method: Callable) -> Callable:
-    """Decorator to cache URL content with a 10s expiration."""
-    @wraps(method)
-    def wrapper(url: str) -> str:
-        cached = r.get(f"cache:{url}")
-        if cached:
-            return cached.decode('utf-8')
-        result = method(url)
-        r.setex(f"cache:{url}", 10, result)
-        return result
-    return wrapper
-
-
-@count_url_access
-@cache_result
+@track_get_page
 def get_page(url: str) -> str:
-    """Fetch the content of a URL and cache it."""
+    """
+    Args:
+
+        url: url to get
+    Returns:
+
+            the HTML content of the URL
+    """
     response = requests.get(url)
     return response.text
